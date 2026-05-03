@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🏨 酒店多平台比价</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+    background: #0f1419; color: #e7e9ea;
+    min-height: 100vh;
+  }
+  .header {
+    background: #1a1f26; padding: 16px 24px;
+    border-bottom: 1px solid #2f3336;
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  }
+  .header h1 { font-size: 20px; color: #1d9bf0; white-space: nowrap; }
+  .search-box {
+    display: flex; gap: 8px; flex: 1; min-width: 300px;
+  }
+  .search-box input {
+    flex: 1; padding: 10px 14px; border: 1px solid #2f3336;
+    border-radius: 8px; background: #0f1419; color: #e7e9ea;
+    font-size: 14px; outline: none; transition: border .2s;
+  }
+  .search-box input:focus { border-color: #1d9bf0; }
+  .search-box input[type="date"] { color-scheme: dark; }
+  .btn {
+    padding: 10px 20px; border: none; border-radius: 8px;
+    font-size: 14px; cursor: pointer; font-weight: 600;
+    transition: all .2s; white-space: nowrap;
+  }
+  .btn-primary { background: #1d9bf0; color: #fff; }
+  .btn-primary:hover { background: #1a8cd8; }
+  .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+  .btn-outline { background: transparent; border: 1px solid #2f3336; color: #e7e9ea; }
+  .btn-outline:hover { border-color: #1d9bf0; color: #1d9bf0; }
+  .btn-small { padding: 6px 12px; font-size: 12px; }
+
+  .layout { display: flex; height: calc(100vh - 73px); }
+  .sidebar {
+    width: 280px; background: #1a1f26; padding: 20px 12px;
+    border-right: 1px solid #2f3336; overflow-y: auto;
+  }
+  .sidebar h3 { font-size: 13px; color: #71767b; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 1px; }
+  .platform-card {
+    background: #0f1419; border: 1px solid #2f3336; border-radius: 8px;
+    padding: 10px 12px; margin-bottom: 8px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .platform-card .emoji { font-size: 18px; }
+  .platform-card .info { flex: 1; min-width: 0; }
+  .platform-card .name { font-size: 13px; font-weight: 600; }
+  .platform-card .status { font-size: 11px; }
+  .platform-card .btn-login { padding: 4px 10px; font-size: 11px; }
+  .status-ok { color: #00ba7c; }
+  .status-no { color: #f91880; }
+  .status-checking { color: #71767b; }
+
+  .main {
+    flex: 1; padding: 24px; overflow-y: auto;
+  }
+  .loading {
+    text-align: center; padding: 60px 0; color: #71767b;
+  }
+  .spinner {
+    width: 36px; height: 36px; border: 3px solid #2f3336;
+    border-top-color: #1d9bf0; border-radius: 50%;
+    animation: spin .8s linear infinite; margin: 0 auto 16px;
+  }
+  @keyframes spin { to { transform:rotate(360deg); } }
+
+  .hotel-info {
+    background: #1a1f26; border: 1px solid #2f3336; border-radius: 12px;
+    padding: 20px; margin-bottom: 20px;
+  }
+  .hotel-info h2 { font-size: 22px; margin-bottom: 6px; }
+  .hotel-info .addr { color: #71767b; font-size: 13px; }
+  .hotel-info .summary {
+    margin-top: 12px; padding: 10px 14px; background: #0f1419;
+    border-radius: 8px; font-size: 14px; color: #1d9bf0;
+  }
+
+  .result-table {
+    width: 100%; border-collapse: collapse;
+    background: #1a1f26; border-radius: 12px; overflow: hidden;
+  }
+  .result-table th {
+    text-align: left; padding: 14px 16px; font-size: 12px;
+    color: #71767b; background: #0f1419; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .5px;
+  }
+  .result-table td {
+    padding: 14px 16px; border-top: 1px solid #2f3336; font-size: 14px;
+  }
+  .result-table tr:hover { background: rgba(29,155,240,.05); }
+  .price-best {
+    color: #00ba7c; font-weight: 700; font-size: 18px;
+  }
+  .price-other { color: #71767b; font-size: 13px; }
+  .platform-tag {
+    display: inline-block; padding: 2px 8px; border-radius: 4px;
+    font-size: 12px; font-weight: 600;
+  }
+  .tag-ctrip { background: rgba(0,153,255,.15); color: #099; }
+  .tag-meituan { background: rgba(255,197,0,.15); color: #ffc500; }
+  .tag-fliggy { background: rgba(255,80,0,.15); color: #ff5000; }
+
+  .alert-box {
+    background: rgba(249,24,128,.1); border: 1px solid #f91880;
+    border-radius: 10px; padding: 14px 18px; margin-top: 16px;
+  }
+  .alert-box .title { color: #f91880; font-weight: 600; margin-bottom: 6px; }
+
+  .empty-state {
+    text-align: center; padding: 80px 20px; color: #71767b;
+  }
+  .empty-state .icon { font-size: 48px; margin-bottom: 16px; }
+
+  .clickable-price {
+    cursor: pointer; transition: all .2s;
+    padding: 2px 8px; border-radius: 4px; display: inline-block;
+    text-decoration: none; margin: 0 2px;
+  }
+  .clickable-price:hover {
+    background: rgba(29,155,240,.15); transform: scale(1.05);
+  }
+  .clickable-price.best {
+    color: #00ba7c; font-size: 18px; font-weight: 700;
+  }
+  .toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    background: #1d9bf0; color: #fff; padding: 10px 24px;
+    border-radius: 20px; font-size: 14px; z-index: 1000;
+    opacity: 0; transition: opacity .3s;
+    pointer-events: none;
+  }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>🏨 酒店比价</h1>
+  <div class="search-box">
+    <input type="text" id="hotelInput" placeholder="输入酒店名称..." value="凯里亚德酒店苏州观前街店">
+    <input type="date" id="checkinInput">
+    <input type="date" id="checkoutInput">
+    <button class="btn btn-primary" id="searchBtn" onclick="doSearch()">🔍 搜索比价</button>
+    <button class="btn btn-outline" id="refreshLogin" onclick="checkLoginStatus()">🔄 刷新登录态</button>
+  </div>
+</div>
+
+<div class="layout">
+  <!-- 左侧：平台登录区 -->
+  <div class="sidebar" id="sidebar">
+    <h3>📋 平台登录状态 (10平台)</h3>
+    {% for p in platforms %}
+    <div class="platform-card" id="card-{{ p.id }}">
+      <div class="emoji">{{ p.emoji }}</div>
+      <div class="info">
+        <div class="name">{{ p.name }}</div>
+        <div class="status status-checking" id="status-{{ p.id }}">检测中...</div>
+      </div>
+      <button class="btn btn-outline btn-login" onclick="openLogin('{{ p.id }}')">登录</button>
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- 右侧：搜索结果 -->
+  <div class="main" id="mainContent">
+    <div class="empty-state">
+      <div class="icon">🔍</div>
+      <p>输入酒店名称和日期，点击「搜索比价」</p>
+      <p style="font-size:13px;margin-top:8px;color:#555">
+        提示：请先在左侧确认各平台已登录
+      </p>
+    </div>
+  </div>
+</div>
+
+<script>
+// 初始化日期默认值
+const today = new Date();
+const checkinInput = document.getElementById('checkinInput');
+const checkoutInput = document.getElementById('checkoutInput');
+checkinInput.value = today.toISOString().split('T')[0];
+const tomorrow = new Date(today);
+tomorrow.setDate(tomorrow.getDate() + 1);
+checkoutInput.value = tomorrow.toISOString().split('T')[0];
+
+// 自动检测登录态
+checkLoginStatus();
+
+async function checkLoginStatus() {
+  try {
+    const resp = await fetch('/api/status');
+    const data = await resp.json();
+    for (const [plat, info] of Object.entries(data)) {
+      const el = document.getElementById('status-' + plat);
+      if (info.logged_in) {
+        el.className = 'status status-ok';
+        el.textContent = '✅ 已登录';
+      } else {
+        el.className = 'status status-no';
+        el.textContent = '❌ 未登录';
+      }
+    }
+  } catch(e) {
+    console.error('Status check failed:', e);
+  }
+}
+
+async function openLogin(platform) {
+  const btn = event.target;
+  btn.disabled = true;
+  btn.textContent = '打开中...';
+  try {
+    const resp = await fetch('/api/login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({platform})
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      btn.textContent = '✅ 已打开';
+      // 5秒后重新检测
+      setTimeout(() => {
+        checkLoginStatus();
+        btn.textContent = '🔑 登录';
+        btn.disabled = false;
+      }, 5000);
+    } else {
+      btn.textContent = '❌ 失败';
+      btn.disabled = false;
+    }
+  } catch(e) {
+    btn.textContent = '🔑 重试';
+    btn.disabled = false;
+  }
+}
+
+async function doSearch() {
+  const hotel = document.getElementById('hotelInput').value.trim();
+  const checkin = checkinInput.value;
+  const checkout = checkoutInput.value;
+  
+  if (!hotel) { alert('请输入酒店名称'); return; }
+  if (!checkin || !checkout) { alert('请选择日期'); return; }
+  
+  const btn = document.getElementById('searchBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ 采集中...';
+  
+  const main = document.getElementById('mainContent');
+  main.innerHTML = '<div class="loading"><div class="spinner"></div><p>正在多平台比价中，请稍候...</p></div>';
+  
+  try {
+    const resp = await fetch('/api/compare', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({hotel, checkin, checkout})
+    });
+    const data = await resp.json();
+    
+    if (data.error) {
+      main.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>${data.error}</p><p style="font-size:13px;color:#555;margin-top:8px">请确认各平台已登录后重试</p></div>`;
+    } else {
+      renderResult(data);
+    }
+  } catch(e) {
+    main.innerHTML = `<div class="empty-state"><div class="icon">❌</div><p>请求失败: ${e.message}</p></div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🔍 搜索比价';
+  }
+}
+
+function renderResult(data) {
+  const main = document.getElementById('mainContent');
+  const urls = data.platform_urls || {};
+  let html = '';
+  
+  // 酒店信息
+  html += `<div class="hotel-info">
+    <h2>${data.hotel}</h2>
+    <div class="addr">📅 入住: ${checkinInput.value} → 离店: ${checkoutInput.value}</div>
+    <div class="summary">📊 ${data.summary}</div>
+    <div style="margin-top:8px;font-size:12px;color:#71767b">💡 点击平台价格可跳转到对应平台查看实时价格</div>
+  </div>`;
+  
+  // 比价表格
+  if (data.rooms && data.rooms.length > 0) {
+    html += '<table class="result-table"><thead><tr>';
+    html += '<th>房型</th><th style="text-align:center">最低价</th><th style="text-align:center">比价详情（点击跳转）</th>';
+    html += '</tr></thead><tbody>';
+    
+    for (const room of data.rooms) {
+      // Build clickable price buttons for each platform
+      const allPricesHTML = Object.entries(room.all_prices || {})
+        .map(([plat, price]) => {
+          const url = urls[plat] || '';
+          const isBest = plat === room.cheapest_platform;
+          const cls = `clickable-price tag-${plat}${isBest ? ' best' : ''}`;
+          return `<span class="${cls}" onclick="navigateTo('${plat}', '${url}')" title="点击查看 ${plat} 实时价格">
+            ${getPlatformEmoji(plat)} ${plat}: ¥${price}
+          </span>`;
+        })
+        .join(' ');
+      
+      html += `<tr>
+        <td>${room.room_name}</td>
+        <td style="text-align:center"><span class="clickable-price best" onclick="navigateTo('${room.cheapest_platform}', '${urls[room.cheapest_platform] || ''}')">
+          ${getPlatformEmoji(room.cheapest_platform)} ¥${room.cheapest_price}
+        </span></td>
+        <td style="text-align:center">${allPricesHTML}</td>
+      </tr>`;
+    }
+    html += '</tbody></table>';
+  }
+  
+  // 预警
+  if (data.alerts && data.alerts.length > 0) {
+    html += '<div class="alert-box"><div class="title">🚨 价格预警</div>';
+    for (const a of data.alerts) {
+      html += `<div>${a.level} ${a.room}: ¥${a.current_price} (均价¥${a.avg_price}, 降${a.drop_percent})</div>`;
+    }
+    html += '</div>';
+  }
+  
+  main.innerHTML = html;
+}
+
+// 点击跳转到平台实时页面
+async function navigateTo(platform, url) {
+  if (!url) return;
+  try {
+    const resp = await fetch('/api/navigate', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({platform, url})
+    });
+    const data = await resp.json();
+    showToast(data.message || `已在浏览器中打开 ${platform}`);
+  } catch(e) {
+    showToast(`跳转失败: ${e.message}`);
+  }
+}
+
+// 获取平台 emoji
+function getPlatformEmoji(plat) {
+  const map = {
+    ctrip: '🔵', meituan: '🟡', fliggy: '🟠', qunar: '🟢',
+    agoda: '🔴', booking: '🔷', expedia: '🟣',
+    douyin: '⚫', jd: '🔴', luke: '🟤'
+  };
+  return map[plat] || '⚪';
+}
+
+// Toast 提示
+function showToast(msg) {
+  let toast = document.getElementById('toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'toast';
+    toast.className = 'toast';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = msg;
+  toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), 2500);
+}
+
+// 回车搜索
+document.getElementById('hotelInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') doSearch();
+});
+</script>
+</body>
+</html>
