@@ -17,11 +17,13 @@ BROWSER_USER_DATA = os.getenv(
     str(Path.home() / ".hotel-compare" / "chrome-profile"),
 )
 
-# ====== LLM 配置 ======
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "deepseek")
-LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-chat")
-LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.deepseek.com")
-LLM_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+# ====== LLM 配置（多厂商支持）======
+# 厂商预设: deepseek | openai | siliconflow | openrouter | zhipu | custom
+# 通过环境变量 HOTEL_LLM_* 或 --llm-provider 等 CLI 参数覆盖
+LLM_PROVIDER = os.getenv("HOTEL_LLM_PROVIDER", os.getenv("LLM_PROVIDER", "deepseek"))
+LLM_MODEL = os.getenv("HOTEL_LLM_MODEL", os.getenv("LLM_MODEL", ""))
+LLM_BASE_URL = os.getenv("HOTEL_LLM_BASE_URL", os.getenv("LLM_BASE_URL", ""))
+LLM_API_KEY = os.getenv("HOTEL_LLM_API_KEY", os.getenv("DEEPSEEK_API_KEY", ""))
 
 # ====== 向量库配置 ======
 CHROMA_PERSIST_DIR = str(PROJECT_ROOT / "data" / "embeddings")
