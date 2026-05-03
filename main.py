@@ -66,6 +66,11 @@ CLI 模式:
     p.add_argument("--monitor", action="store_true", help="持续监控模式")
     p.add_argument("--interval", default="6h", help="监控间隔")
     p.add_argument("--no-llm", action="store_true", help="禁用 LLM")
+    p.add_argument("--list-providers", action="store_true", help="列出所有 LLM 厂商预设")
+    p.add_argument("--llm-provider", help="LLM 厂商: deepseek|openai|siliconflow|openrouter|zhipu|custom")
+    p.add_argument("--llm-model", help="LLM 模型名（覆盖厂商预设）")
+    p.add_argument("--llm-api-key", help="API Key（覆盖环境变量）")
+    p.add_argument("--llm-base-url", help="API Base URL（覆盖预设）")
     p.add_argument("--output", help="输出 JSON 路径")
     p.add_argument("--no-notify", action="store_true", help="禁用通知")
     return p.parse_args()
@@ -87,10 +92,14 @@ def parse_interval(interval: str) -> int:
         return val * 86400
 
 
-def scrape_platforms(browser, hotel_info, checkin, checkout, platforms, use_llm=True):
+def scrape_platforms(browser, hotel_info, checkin, checkout, platforms, use_llm=True,
+                     llm_provider=None, llm_model=None, llm_api_key=None, llm_base_url=None):
     """采集所有平台"""
     rooms_by_platform = {}
-    llm_parser = LLMParser() if use_llm else None
+    llm_parser = LLMParser(
+        provider=llm_provider, model=llm_model,
+        api_key=llm_api_key, base_url=llm_base_url,
+    ) if use_llm else None
 
     for plat in platforms:
         name = PLATFORM_NAMES.get(plat, plat)
@@ -165,6 +174,21 @@ def display(comparison):
 def main():
     args = parse_args()
 
+    # === 列出厂商 ===
+    if args.list_providers:
+        from src.parser.extractor import list_providers
+        table = Table(title="可用 LLM 厂商")
+        table.add_column("厂商", style="cyan")
+        table.add_column("默认模型", style="green")
+        table.add_column("Key 环境变量", style="yellow")
+        table.add_column("说明")
+        for k, v in list_providers().items():
+            table.add_row(k, v["model"], v["key_env"], v["desc"])
+        console.print(table)
+        console.print("\n[dim]用法: python main.py --llm-provider openai --llm-model gpt-4o[/]")
+        console.print("[dim]或设置: export HOTEL_LLM_PROVIDER=openai[/]")
+        return
+
     # === Web 模式 ===
     if args.web:
         from src.web.app import start_web
@@ -224,6 +248,10 @@ def main():
             rooms = scrape_platforms(
                 browser, hotel_info, checkin, checkout, platforms,
                 use_llm=not args.no_llm,
+                llm_provider=args.llm_provider,
+                llm_model=args.llm_model,
+                llm_api_key=args.llm_api_key,
+                llm_base_url=args.llm_base_url,
             )
 
             if not rooms:
