@@ -6,7 +6,7 @@
 
 - **10 平台覆盖** — 携程、美团、飞猪、去哪儿、Agoda、Booking.com、Expedia、抖音、京东、路客
 - **全自动采集** — DrissionPage 接管 Chrome，绕过反爬，登录一次长期有效
-- **LLM 智能解析** — DeepSeek 官方 API 提取房型名称与价格，无需手写正则
+- **LLM 智能解析** — 多厂商 LLM 自由切换（DeepSeek / OpenAI / SiliconFlow / OpenRouter / 智谱 / 自定义端点），无需手写正则
 - **房型智能匹配** — N-gram 中文相似度算法，跨平台匹配同款房型
 - **Web 可视化** — Flask 仪表盘，登录状态面板 + 比价结果表格，点击价格跳转实时页面
 - **飞书通知** — 降价推送、定时监控
@@ -119,7 +119,7 @@ hotel-compare/
 │   │   ├── domestic.py         # 去哪儿 / 抖音 / 京东 / 路客
 │   │   └── international.py    # Agoda / Booking / Expedia
 │   ├── parser/
-│   │   └── extractor.py        # DeepSeek LLM 房型解析器
+│   │   └── extractor.py        # 多厂商 LLM 房型解析器（可切换）
 │   ├── matcher/
 │   │   └── room_matcher.py     # N-gram 房型匹配器
 │   ├── comparator/
@@ -147,7 +147,7 @@ hotel-compare/
 - Python ≥ 3.10
 - [DrissionPage](https://github.com/g1879/DrissionPage) — 浏览器自动化
 - [Flask](https://flask.palletsprojects.com/) — Web 服务
-- [DeepSeek API](https://platform.deepseek.com/) — LLM 解析
+- 任一 LLM 厂商 API Key — 房型解析（DeepSeek / OpenAI / SiliconFlow 等 6 种可选）
 - Chrome / Chromium ≥ 120
 
 ## 📄 License
