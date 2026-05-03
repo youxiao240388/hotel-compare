@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.env
+*.log
+.DS_Store
+*.db
+*.sqlite
+browser_data/
+user_data/
+/tmp/
+*.zip
+chromium-portable/
