@@ -1,21 +1,220 @@
 """
-LLM 数据解析器 - 利用大模型从非结构化页面内容中提取标准化房型信息
+LLM 数据解析器 - 支持多厂商智能体，用户可自行选择
 
-设计依据（文档第四章）：
-- 将页面HTML/文本发送给LLM，以JSON格式返回结构化数据
-- Prompt 工程：要求LLM扮演酒店数据分析师角色
+支持的厂商预设（一键切换）：
+  deepseek    → DeepSeek 官方 (deepseek-chat)
+  openai      → OpenAI (gpt-4o-mini)
+  siliconflow → SiliconFlow (deepseek-ai/DeepSeek-V3)
+  openrouter  → OpenRouter (openai/gpt-4o-mini)
+  zhipu       → 智谱 GLM (glm-4-flash)
+  custom      → 自定义 OpenAI 兼容端点
+
+环境变量覆盖（优先级最高）：
+  HOTEL_LLM_PROVIDER / HOTEL_LLM_MODEL / HOTEL_LLM_API_KEY / HOTEL_LLM_BASE_URL
 """
+
 import json
 import logging
+import os
 import re
-from typing import List
+import subprocess
+from pathlib import Path
+from typing import List, Optional
 
 import httpx
 
-from config.settings import LLM_PROVIDER, LLM_MODEL, LLM_BASE_URL, LLM_API_KEY
 from src.platforms.base import RoomInfo
 
 logger = logging.getLogger(__name__)
+
+# ── 厂商预设 ──────────────────────────────────────────────
+PROVIDER_PRESETS = {
+    "deepseek": {
+        "model": "deepseek-chat",
+        "base_url": "https://api.deepseek.com",
+        "api_key_env": "DEEPSEEK_API_KEY",
+        "desc": "DeepSeek 官方",
+    },
+    "openai": {
+        "model": "gpt-4o-mini",
+        "base_url": "https://api.openai.com/v1",
+        "api_key_env": "OPENAI_API_KEY",
+        "desc": "OpenAI",
+    },
+    "siliconflow": {
+        "model": "deepseek-ai/DeepSeek-V3",
+        "base_url": "https://api.siliconflow.cn/v1",
+        "api_key_env": "SILICONFLOW_API_KEY",
+        "desc": "SiliconFlow（国产模型聚合）",
+    },
+    "openrouter": {
+        "model": "openai/gpt-4o-mini",
+        "base_url": "https://openrouter.ai/api/v1",
+        "api_key_env": "OPENROUTER_API_KEY",
+        "desc": "OpenRouter（全球模型聚合）",
+    },
+    "zhipu": {
+        "model": "glm-4-flash",
+        "base_url": "https://open.bigmodel.cn/api/paas/v4",
+        "api_key_env": "ZHIPU_API_KEY",
+        "desc": "智谱 GLM",
+    },
+    "custom": {
+        "model": "",
+        "base_url": "",
+        "api_key_env": "HOTEL_LLM_API_KEY",
+        "desc": "自定义 OpenAI 兼容端点",
+    },
+}
+
+
+def list_providers() -> dict:
+    """列出所有可用厂商"""
+    return {
+        k: {"model": v["model"], "desc": v["desc"], "key_env": v["api_key_env"]}
+        for k, v in PROVIDER_PRESETS.items()
+    }
+
+
+def resolve_llm_config(
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    api_key: Optional[str] = None,
+    base_url: Optional[str] = None,
+) -> dict:
+    """
+    解析 LLM 配置，优先级：
+    1. 显式传入参数
+    2. HOTEL_LLM_* 环境变量
+    3. 厂商预设
+    4. Hermes config.yaml 兜底
+    """
+
+    # ── 确定 provider ──
+    p = provider or os.getenv("HOTEL_LLM_PROVIDER", "") or os.getenv("LLM_PROVIDER", "")
+    if not p:
+        # 从 config.yaml 推断
+        p = _guess_provider_from_hermes()
+
+    preset = PROVIDER_PRESETS.get(p, {})
+
+    # ── base_url ──
+    url = (
+        base_url
+        or os.getenv("HOTEL_LLM_BASE_URL", "")
+        or os.getenv("LLM_BASE_URL", "")
+        or preset.get("base_url", "")
+        or _detect_base_url_from_hermes()
+        or "https://api.deepseek.com"
+    )
+
+    # ── model ──
+    m = (
+        model
+        or os.getenv("HOTEL_LLM_MODEL", "")
+        or os.getenv("LLM_MODEL", "")
+        or preset.get("model", "")
+        or _detect_model_from_hermes()
+        or "deepseek-chat"
+    )
+
+    # ── api_key ──
+    key = (
+        api_key
+        or os.getenv("HOTEL_LLM_API_KEY", "")
+        or os.getenv(preset.get("api_key_env", ""), "")
+        or _detect_api_key_from_hermes()
+        or ""
+    )
+
+    return {
+        "provider": p or "deepseek",
+        "model": m,
+        "base_url": url,
+        "api_key": key,
+    }
+
+
+def _guess_provider_from_hermes() -> str:
+    """从 Hermes config.yaml 推断当前使用的 provider"""
+    try:
+        import yaml
+        hermes = Path.home() / ".hermes" / "config.yaml"
+        if hermes.exists():
+            with open(hermes) as f:
+                config = yaml.safe_load(f)
+            mc = config.get("model", {})
+            provider = mc.get("provider", "")
+            if provider == "deepseek":
+                return "deepseek"
+            if provider == "openai":
+                return "openai"
+            if provider == "openrouter":
+                return "openrouter"
+    except Exception:
+        pass
+    return ""
+
+
+def _detect_base_url_from_hermes() -> str:
+    try:
+        import yaml
+        hermes = Path.home() / ".hermes" / "config.yaml"
+        if hermes.exists():
+            with open(hermes) as f:
+                config = yaml.safe_load(f)
+            mc = config.get("model", {})
+            url = mc.get("base_url", "")
+            if url:
+                return url
+            for cp in config.get("custom_providers", []):
+                url = cp.get("base_url", "")
+                if url:
+                    return url
+    except Exception:
+        pass
+    return ""
+
+
+def _detect_model_from_hermes() -> str:
+    try:
+        import yaml
+        hermes = Path.home() / ".hermes" / "config.yaml"
+        if hermes.exists():
+            with open(hermes) as f:
+                config = yaml.safe_load(f)
+            mc = config.get("model", {})
+            model = mc.get("default", "")
+            if model:
+                return model
+            for cp in config.get("custom_providers", []):
+                model = cp.get("model", "")
+                if model:
+                    return model
+    except Exception:
+        pass
+    return ""
+
+
+def _detect_api_key_from_hermes() -> str:
+    try:
+        import yaml
+        hermes = Path.home() / ".hermes" / "config.yaml"
+        if hermes.exists():
+            with open(hermes) as f:
+                config = yaml.safe_load(f)
+            mc = config.get("model", {})
+            key = mc.get("api_key", "")
+            if key:
+                return key
+            for cp in config.get("custom_providers", []):
+                key = cp.get("api_key", "")
+                if key:
+                    return key
+    except Exception:
+        pass
+    return ""
+
 
 EXTRACTION_PROMPT = """你是一个专业的酒店数据分析师。请从以下酒店页面内容中，提取所有房型的关键信息。
 
@@ -39,118 +238,35 @@ EXTRACTION_PROMPT = """你是一个专业的酒店数据分析师。请从以下
 
 
 class LLMParser:
-    """LLM 驱动的数据解析器"""
+    """多厂商 LLM 驱动的数据解析器"""
 
-    def __init__(self):
-        self._api_key = self._detect_api_key()
-        self._base_url = self._detect_base_url()
-        self._model = self._detect_model()
+    def __init__(
+        self,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+    ):
+        cfg = resolve_llm_config(provider, model, api_key, base_url)
+        self._provider = cfg["provider"]
+        self._model = cfg["model"]
+        self._api_key = cfg["api_key"]
+        self._base_url = cfg["base_url"]
         self.client = httpx.Client(timeout=httpx.Timeout(60.0))
 
-    def _detect_base_url(self) -> str:
-        """检测 API Base URL，优先级：环境变量 > DeepSeek官方 > SiliconFlow备用 > settings"""
-        import os, yaml
-        from pathlib import Path
+        logger.info(
+            f"LLM 解析器: provider={self._provider}, model={self._model}"
+        )
 
-        # 1. 环境变量
-        for var in ["LLM_BASE_URL", "OPENAI_BASE_URL"]:
-            val = os.getenv(var, "")
-            if val:
-                return val
-
-        # 2. Hermes config
-        hermes_config = Path.home() / ".hermes" / "config.yaml"
-        if hermes_config.exists():
-            try:
-                with open(hermes_config) as f:
-                    config = yaml.safe_load(f)
-                # 优先 DeepSeek 官方
-                mc = config.get("model", {})
-                if mc.get("provider") == "deepseek":
-                    url = mc.get("base_url", "")
-                    key = mc.get("api_key", "")
-                    if url and key:
-                        return url
-                # 备用: custom_providers (SiliconFlow)
-                for cp in config.get("custom_providers", []):
-                    url = cp.get("base_url", "")
-                    key = cp.get("api_key", "")
-                    if url and key:
-                        return url
-            except Exception:
-                pass
-
-        if LLM_BASE_URL:
-            return LLM_BASE_URL
-
-        return "https://api.deepseek.com"
-
-    def _detect_model(self) -> str:
-        """检测模型名称"""
-        import os, yaml
-        from pathlib import Path
-
-        for var in ["LLM_MODEL", "OPENAI_MODEL"]:
-            val = os.getenv(var, "")
-            if val:
-                return val
-
-        hermes_config = Path.home() / ".hermes" / "config.yaml"
-        if hermes_config.exists():
-            try:
-                with open(hermes_config) as f:
-                    config = yaml.safe_load(f)
-                # 优先 DeepSeek 官方
-                mc = config.get("model", {})
-                if mc.get("provider") == "deepseek":
-                    model = mc.get("default", "")
-                    if model:
-                        return model
-                for cp in config.get("custom_providers", []):
-                    model = cp.get("model", "")
-                    if model:
-                        return model
-            except Exception:
-                pass
-
-        if LLM_MODEL:
-            return LLM_MODEL
-
-        return "deepseek-chat"
-
-    def _detect_api_key(self) -> str:
-        """尝试从环境变量或 Hermes 配置文件自动检测 API Key"""
-        import os
-        import yaml
-        from pathlib import Path
-
-        # 1. 环境变量
-        for key in ["DEEPSEEK_API_KEY", "OPENAI_API_KEY"]:
-            val = os.getenv(key, "")
-            if val:
-                return val
-
-        # 2. Hermes config.yaml（优先 DeepSeek 官方 → SiliconFlow 备用）
-        hermes_config = Path.home() / ".hermes" / "config.yaml"
-        if hermes_config.exists():
-            try:
-                with open(hermes_config) as f:
-                    config = yaml.safe_load(f)
-                # 优先: 顶层 model 配置 (DeepSeek 官方)
-                mc = config.get("model", {})
-                if mc.get("provider") == "deepseek":
-                    api_key = mc.get("api_key", "")
-                    if api_key:
-                        return api_key
-                # 备用: custom_providers (SiliconFlow)
-                for cp in config.get("custom_providers", []):
-                    api_key = cp.get("api_key", "")
-                    if api_key:
-                        return api_key
-            except Exception as e:
-                logger.debug(f"读取 Hermes 配置失败: {e}")
-
-        return ""
+    @property
+    def config(self) -> dict:
+        """返回当前配置（供 CLI --list-providers 查看）"""
+        return {
+            "provider": self._provider,
+            "model": self._model,
+            "base_url": self._base_url,
+            "has_key": bool(self._api_key),
+        }
 
     def extract_rooms(
         self,
@@ -158,21 +274,9 @@ class LLMParser:
         platform: str,
         truncate_chars: int = 8000,
     ) -> List[RoomInfo]:
-        """
-        从页面内容中提取房型信息
-
-        Args:
-            page_content: 页面文本或HTML片段
-            platform: 平台名称
-            truncate_chars: 截断长度（控制 token 消耗）
-
-        Returns:
-            标准化房型列表
-        """
         if not page_content.strip():
             return []
 
-        # 截断以控制 token
         content = page_content[:truncate_chars]
 
         try:
@@ -180,15 +284,11 @@ class LLMParser:
             rooms = self._parse_response(raw_json, platform)
             logger.info(f"LLM 从 {platform} 解析出 {len(rooms)} 个房型")
             return rooms
-
         except Exception as e:
             logger.error(f"LLM 解析失败: {e}")
             return []
 
     def _call_llm(self, page_content: str) -> str:
-        """调用 LLM API（通过 curl 子进程，绕过 httpx chunked-encoding 超时问题）"""
-        import subprocess
-
         prompt = EXTRACTION_PROMPT.format(page_content=page_content)
 
         payload = json.dumps({
@@ -201,9 +301,7 @@ class LLMParser:
             "max_tokens": 4096,
         })
 
-        headers = [
-            "-H", "Content-Type: application/json",
-        ]
+        headers = ["-H", "Content-Type: application/json"]
         if self._api_key:
             headers += ["-H", f"Authorization: Bearer {self._api_key}"]
 
@@ -225,8 +323,6 @@ class LLMParser:
         return data["choices"][0]["message"]["content"]
 
     def _parse_response(self, raw: str, platform: str) -> List[RoomInfo]:
-        """解析 LLM 返回的 JSON"""
-        # 提取 JSON 数组
         json_match = re.search(r"\[.*\]", raw, re.DOTALL)
         if not json_match:
             logger.warning("LLM 返回内容中未找到 JSON 数组")
@@ -260,8 +356,6 @@ class LLMParser:
         return rooms
 
     def _repair_json(self, bad_json: str) -> list:
-        """尝试修复损坏的 JSON"""
-        # 简单修复：去掉尾部多余逗号
         fixed = re.sub(r",\s*]", "]", bad_json)
         fixed = re.sub(r",\s*}", "}", fixed)
         try:
