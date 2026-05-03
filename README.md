@@ -42,11 +42,29 @@ pip install -r requirements.txt
 ### 配置
 
 ```bash
-# 设置 DeepSeek API Key（用于房型智能解析）
-export DEEPSEEK_API_KEY="sk-xxxxxxxxxxxxxxxx"
+# 设置 LLM 厂商（六选一）
+export HOTEL_LLM_PROVIDER=deepseek    # DeepSeek 官方（默认）
+# export HOTEL_LLM_PROVIDER=openai    # OpenAI
+# export HOTEL_LLM_PROVIDER=siliconflow  # SiliconFlow 国产聚合
+# export HOTEL_LLM_PROVIDER=openrouter   # OpenRouter 全球聚合
+# export HOTEL_LLM_PROVIDER=zhipu     # 智谱 GLM
+# export HOTEL_LLM_PROVIDER=custom    # 自定义端点
 
-# （可选）自定义 Chrome 路径
-export CHROME_PATH="/path/to/chrome"
+# 设置对应 API Key（按厂商选一个）
+export DEEPSEEK_API_KEY="sk-xxxxxxxx"      # DeepSeek
+# export OPENAI_API_KEY="sk-xxxxxxxx"      # OpenAI
+# export SILICONFLOW_API_KEY="sk-xxxxx"    # SiliconFlow
+# export OPENROUTER_API_KEY="sk-xxxxx"     # OpenRouter
+# export ZHIPU_API_KEY="xxxxx"             # 智谱
+
+# 自定义模型（可选，覆盖厂商默认模型）
+export HOTEL_LLM_MODEL="gpt-4o"
+
+# 自定义 API 端点（可选）
+export HOTEL_LLM_BASE_URL="https://your-api.com/v1"
+
+# 查看所有可用厂商
+python main.py --list-providers
 ```
 
 ### 运行
@@ -65,6 +83,10 @@ python main.py --web
 ```bash
 # 单次比价
 python main.py --hotel "凯里亚德酒店苏州观前街店" --checkin 2026-05-04 --checkout 2026-05-05
+
+# 使用 OpenAI 解析房型
+python main.py --hotel "凯里亚德酒店" --checkin 2026-05-04 --checkout 2026-05-05 \
+  --llm-provider openai --llm-model gpt-4o
 
 # 引导登录
 python main.py --login
@@ -116,7 +138,7 @@ hotel-compare/
 | 问题 | 方案 | 原因 |
 |------|------|------|
 | 反爬绕过 | DrissionPage 接管已有 Chrome | 复用用户登录态，无需模拟输入密码 |
-| 房型解析 | DeepSeek 官方 API | 准确率远超正则，处理各平台不同格式 |
+| 房型解析 | 多厂商 LLM（6 家可选） | 用户可自由选择 DeepSeek/OpenAI/SiliconFlow 等 |
 | 房型匹配 | N-gram 字符相似度 | 免下载 120MB 模型，中文房名匹配效果好 |
 | 无头运行 | `--headless` + `--remote-allow-origins=*` | DrissionPage 兼容旧版 headless 协议 |
 
