@@ -1,0 +1,29 @@
+# 酒店比价工具 - Docker Compose
+# 使用: docker-compose up -d
+
+version: "3.8"
+
+services:
+  hotel-compare:
+    build: .
+    container_name: hotel-compare
+    restart: unless-stopped
+    environment:
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - FEISHU_APP_ID=${FEISHU_APP_ID:-}
+      - FEISHU_APP_SECRET=${FEISHU_APP_SECRET:-}
+      - FEISHU_USER_ID=${FEISHU_USER_ID:-}
+      - TZ=Asia/Shanghai
+    volumes:
+      # 持久化 Chrome 用户数据（保留登录态）
+      - chrome-data:/root/.hotel-compare/chrome-profile
+      # 持久化历史价格数据
+      - ./data:/app/data
+    ports:
+      - "9222:9222"  # Chrome debug port
+    cap_add:
+      - SYS_ADMIN  # Chrome 需要
+    shm_size: "2gb"
+
+volumes:
+  chrome-data:
