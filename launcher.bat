@@ -1,5 +1,4 @@
 @echo off
-chcp 65001 >nul 2>&1
 title Hotel Compare - Service Manager
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
@@ -8,26 +7,13 @@ set "INSTALL_DIR=%~dp0"
 if "!INSTALL_DIR:~-1!"=="\" set "INSTALL_DIR=!INSTALL_DIR:~0,-1!"
 set "LOGFILE=!INSTALL_DIR!\launcher_log.txt"
 
-:: Init log
+:: Init log (use system encoding, no chcp 65001)
 echo ======================================== > "!LOGFILE!"
 echo Hotel Compare Launcher Log >> "!LOGFILE!"
-echo Time: %date% %time% >> "!LOGFILE!"
 echo Install: !INSTALL_DIR! >> "!LOGFILE!"
 echo ======================================== >> "!LOGFILE!"
-echo. >> "!LOGFILE!"
 
 call :LOG "Launcher started"
-call :LOG "Install dir: !INSTALL_DIR!"
-
-:: Quick environment check
-call :LOG "--- Environment ---"
-for /f "delims=" %%v in ('python --version 2^>^&1') do call :LOG "Python: %%v"
-if exist "C:\Program Files\Google\Chrome\Application\chrome.exe" (
-    call :LOG "Chrome: found"
-) else (
-    call :LOG "Chrome: check manually"
-)
-call :LOG "---"
 
 :MENU
 cls
@@ -39,21 +25,19 @@ echo(
 echo    Install: !INSTALL_DIR!
 echo(
 
-:: Check service status
-set "SERVICE_STATUS=Stopped"
-set "PID="
-set "NETSTAT_TMP=%TEMP%\hc_ns_%RANDOM%.txt"
-netstat -ano > "!NETSTAT_TMP!" 2>nul
-for /f "tokens=5" %%p in ('findstr /c:":8888 " "!NETSTAT_TMP!" ^| findstr /c:"LISTENING"') do (
-    set "PID=%%p"
-    set "SERVICE_STATUS=Running"
+:: Check service status via temp file
+set "FOUND_PID="
+set "_NS=%TEMP%\hc_ns_%RANDOM%.txt"
+netstat -ano > "!_NS!" 2>nul
+for /f "tokens=5" %%p in ('findstr /c:":8888 " "!_NS!" ^| findstr /c:"LISTENING"') do (
+    if not "%%p"=="" set "FOUND_PID=%%p"
 )
-del "!NETSTAT_TMP!" 2>nul
+del "!_NS!" 2>nul
 
-if "!SERVICE_STATUS!"=="Running" (
-    echo    Status:  [RUNNING]  PID: !PID!
+if not "!FOUND_PID!"=="" (
+    echo    Status:  [RUNNING]  PID: !FOUND_PID!
     echo    Web UI:  http://127.0.0.1:8888
-    call :LOG "Status: RUNNING (PID !PID!)"
+    call :LOG "Status: RUNNING PID !FOUND_PID!"
 ) else (
     echo    Status:  [STOPPED]
     call :LOG "Status: STOPPED"
@@ -67,7 +51,7 @@ echo    [3] Restart Service
 echo    [4] Open Web UI
 echo(
 echo    [5] Create Desktop Shortcut
-echo    [6] View Log File
+echo    [6] View Log
 echo    [7] Uninstall
 echo(
 echo    [0] Exit
@@ -77,7 +61,7 @@ echo(
 
 set "CHOICE="
 set /p "CHOICE=  Select [0-7]: "
-call :LOG "User selected: !CHOICE!"
+call :LOG "User: !CHOICE!"
 
 if "!CHOICE!"=="1" goto :START
 if "!CHOICE!"=="2" goto :STOP
@@ -91,13 +75,13 @@ goto :MENU
 
 :START
 echo(
-call :LOG "=== START SERVICE ==="
+call :LOG "=== START ==="
 
 :: Check already running
 call :CHECK_PORT
-if defined FOUND_PID (
-    echo  [!] Already running on port 8888 (PID !FOUND_PID!)
-    call :LOG "Already running (PID !FOUND_PID!)"
+if not "!FOUND_PID!"=="" (
+    echo  [!] Already running on 8888 (PID !FOUND_PID!)
+    call :LOG "Already running PID !FOUND_PID!"
     echo(
     pause
     goto :MENU
@@ -106,77 +90,75 @@ if defined FOUND_PID (
 :: Find Python
 set "PY_CMD="
 if exist "!INSTALL_DIR!\venv\Scripts\python.exe" (
-    set "PY_CMD=venv\Scripts\python.exe"
-    call :LOG "Python: venv"
+    set "PY_CMD=!INSTALL_DIR!\venv\Scripts\python.exe"
     goto :FOUND_PY
 )
 python --version >nul 2>&1
 if !errorlevel! equ 0 (
     set "PY_CMD=python"
-    call :LOG "Python: system"
     goto :FOUND_PY
 )
 py -3 --version >nul 2>&1
 if !errorlevel! equ 0 (
     set "PY_CMD=py -3"
-    call :LOG "Python: py launcher"
     goto :FOUND_PY
 )
 
 echo  [X] Python not found
-call :LOG "ERROR: Python not found"
+call :LOG "ERROR: no Python"
 echo      Install: https://apps.microsoft.com/detail/9P7QFQMJRFP7
 echo(
 pause
 goto :MENU
 
 :FOUND_PY
-echo  [*] Using: !PY_CMD!
-echo  [*] Launching web service...
-call :LOG "Launching: !PY_CMD! main.py --web"
+echo  [*] Python: !PY_CMD!
+echo  [*] Starting service...
+call :LOG "Python: !PY_CMD!"
 
-:: Write a launcher helper script to avoid quote escaping issues
-set "LAUNCH_PS=%TEMP%\hc_launch.ps1"
+:: Write a helper bat to avoid quote escaping hell
+set "LAUNCH_BAT=%TEMP%\hc_start_%RANDOM%.bat"
 (
-echo $pinfo = New-Object System.Diagnostics.ProcessStartInfo
-echo $pinfo.FileName = 'cmd.exe'
-echo $pinfo.Arguments = '/c cd /d "!INSTALL_DIR!" ^&^& !PY_CMD! main.py --web ^> "!INSTALL_DIR!\service_log.txt" 2^>^&1'
-echo $pinfo.WorkingDirectory = '!INSTALL_DIR!'
-echo $pinfo.UseShellExecute = $true
-echo $pinfo.CreateNoWindow = $false
-echo [System.Diagnostics.Process]::Start($pinfo^)
-) > "!LAUNCH_PS!"
+echo @echo off
+echo cd /d "!INSTALL_DIR!"
+echo "!PY_CMD!" main.py --web ^> "!INSTALL_DIR!\service_log.txt" 2^>^&1
+echo echo.
+echo echo Service stopped. Press any key...
+echo pause ^>nul
+) > "!LAUNCH_BAT!"
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "!LAUNCH_PS!" >nul 2>&1
-del "!LAUNCH_PS!" 2>nul
-call :LOG "Service process launched"
+start "HotelCompareWeb" "!LAUNCH_BAT!"
+call :LOG "Launched via helper bat"
 
 :: Wait for port
-echo  [*] Waiting for service...
-set /a "WAIT_COUNT=0"
+echo  [*] Waiting for port 8888...
+set /a "WAIT=0"
 :WAIT_LOOP
 timeout /t 1 /nobreak >nul
-set /a "WAIT_COUNT+=1"
+set /a "WAIT+=1"
 
 call :CHECK_PORT
-if defined FOUND_PID (
+if not "!FOUND_PID!"=="" (
     echo  [OK] Service started (PID !FOUND_PID!)
-    call :LOG "Service up after !WAIT_COUNT!s (PID !FOUND_PID!)"
+    call :LOG "Up after !WAIT!s PID !FOUND_PID!"
     timeout /t 1 /nobreak >nul
     start "" "http://127.0.0.1:8888"
     goto :MENU
 )
 
-if !WAIT_COUNT! geq 20 (
-    echo  [!] Timeout (20s)
-    call :LOG "ERROR: Timeout after 20s"
-    echo      Check service_log.txt for errors:
-    echo      !INSTALL_DIR!\service_log.txt
+if !WAIT! geq 20 (
+    echo  [!] Timeout (20s) - service failed to start
+    call :LOG "ERROR: timeout 20s"
     echo(
     if exist "!INSTALL_DIR!\service_log.txt" (
-        echo  --- Last 10 lines of service log ---
-        powershell -NoProfile -Command "Get-Content '!INSTALL_DIR!\service_log.txt' -Tail 10"
+        echo  --- service_log.txt (last 15 lines) ---
+        powershell -NoProfile -Command "Get-Content '!INSTALL_DIR!\service_log.txt' -Tail 15"
         echo  --- end ---
+    ) else (
+        echo  No service_log.txt found.
+        echo  Try running manually:
+        echo    cd !INSTALL_DIR!
+        echo    python main.py --web
     )
     echo(
     pause
@@ -186,22 +168,24 @@ goto :WAIT_LOOP
 
 :STOP
 echo(
-call :LOG "=== STOP SERVICE ==="
+call :LOG "=== STOP ==="
 set "KILLED=0"
-
 call :CHECK_PORT
-if defined FOUND_PID (
-    call :LOG "Killing PID !FOUND_PID!"
+if not "!FOUND_PID!"=="" (
+    call :LOG "Kill PID !FOUND_PID!"
     taskkill /pid !FOUND_PID! /f >nul 2>&1
     set "KILLED=1"
 )
 taskkill /fi "windowtitle eq HotelCompareWeb*" /f >nul 2>&1
+:: Also kill any helper bat
+for %%f in ("%TEMP%\hc_start_*.bat") do taskkill /fi "windowtitle eq %%~nf*" /f >nul 2>&1
+
 if "!KILLED!"=="1" (
-    echo  [OK] Service stopped
-    call :LOG "Service stopped"
+    echo  [OK] Stopped
+    call :LOG "Stopped"
 ) else (
-    echo  [!] No running service found
-    call :LOG "No service on 8888"
+    echo  [!] Not running
+    call :LOG "Not running"
 )
 echo(
 pause
@@ -216,7 +200,7 @@ goto :START
 
 :STOP_SILENT
 call :CHECK_PORT
-if defined FOUND_PID (
+if not "!FOUND_PID!"=="" (
     taskkill /pid !FOUND_PID! /f >nul 2>&1
 )
 taskkill /fi "windowtitle eq HotelCompareWeb*" /f >nul 2>&1
@@ -231,8 +215,8 @@ goto :MENU
 
 :SHORTCUT
 echo(
-call :LOG "Creating desktop shortcut..."
-set "PS_SCRIPT=%TEMP%\create_shortcut.ps1"
+call :LOG "Creating shortcut..."
+set "PS_SCRIPT=%TEMP%\hc_shortcut.ps1"
 
 (
 echo $ws = New-Object -ComObject WScript.Shell
@@ -249,8 +233,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "!PS_SCRIPT!" 2>&1
 del "!PS_SCRIPT!" 2>nul
 
 if exist "%USERPROFILE%\Desktop\Hotel Compare.lnk" (
-    echo  [OK] Shortcut on desktop
-    call :LOG "Shortcut created"
+    echo  [OK] Desktop shortcut created
+    call :LOG "Shortcut OK"
 ) else (
     echo  [X] Failed
     call :LOG "Shortcut failed"
@@ -266,28 +250,41 @@ echo  =============================================
 echo    Logs
 echo  =============================================
 echo(
-echo  Launcher: !LOGFILE!
-echo  Service:  !INSTALL_DIR!\service_log.txt
+echo  [1] Launcher log
+echo  [2] Service log
+echo  [0] Back
 echo(
-echo  --- launcher_log.txt (last 40 lines) ---
-echo(
-if exist "!LOGFILE!" (
-    powershell -NoProfile -Command "Get-Content '!LOGFILE!' -Tail 40"
-) else (
-    echo  (not created yet)
+set "LOG_CHOICE="
+set /p "LOG_CHOICE=  Select: "
+
+if "!LOG_CHOICE!"=="1" (
+    if exist "!LOGFILE!" (
+        cls
+        echo(
+        echo  --- launcher_log.txt ---
+        echo(
+        type "!LOGFILE!"
+        echo(
+    ) else (
+        echo  (no log yet)
+    )
+    echo(
+    pause
 )
-echo(
-echo  --- service_log.txt (last 20 lines) ---
-echo(
-if exist "!INSTALL_DIR!\service_log.txt" (
-    powershell -NoProfile -Command "Get-Content '!INSTALL_DIR!\service_log.txt' -Tail 20"
-) else (
-    echo  (service not started yet)
+if "!LOG_CHOICE!"=="2" (
+    if exist "!INSTALL_DIR!\service_log.txt" (
+        cls
+        echo(
+        echo  --- service_log.txt ---
+        echo(
+        type "!INSTALL_DIR!\service_log.txt"
+        echo(
+    ) else (
+        echo  (service not started yet)
+    )
+    echo(
+    pause
 )
-echo(
-echo  =============================================
-echo(
-pause
 goto :MENU
 
 :UNINSTALL
@@ -298,75 +295,66 @@ echo    Uninstall Hotel Compare
 echo  =============================================
 echo(
 echo    Will delete:
-echo      - Service (if running)
 echo      - !INSTALL_DIR!
 echo      - Desktop shortcut
 echo      - Cookie data
 echo(
-echo    Chrome profile will be KEPT.
+echo    Chrome profile KEPT.
 echo(
 
 set "CONFIRM="
-set /p "CONFIRM=  Type YES to confirm: "
+set /p "CONFIRM=  Type YES: "
 if not "!CONFIRM!"=="YES" (
     echo  Cancelled.
-    call :LOG "Uninstall cancelled"
     timeout /t 1 /nobreak >nul
     goto :MENU
 )
 
 echo(
-echo  [1/4] Stopping service...
+echo  [1/4] Stopping...
 call :STOP_SILENT >nul 2>&1
 echo  [OK]
 
-echo  [2/4] Removing shortcut...
+echo  [2/4] Shortcut...
 del "%USERPROFILE%\Desktop\Hotel Compare.lnk" 2>nul
 echo  [OK]
 
-echo  [3/4] Removing cookies...
+echo  [3/4] Cookies...
 rd /s /q "%USERPROFILE%\.hotel-compare\cookies" 2>nul
 echo  [OK]
 
-echo  [4/4] Removing files...
-call :LOG "Removing !INSTALL_DIR!"
+echo  [4/4] Files...
 cd /d "%TEMP%"
 timeout /t 2 /nobreak >nul
 rd /s /q "!INSTALL_DIR!" 2>nul
 if exist "!INSTALL_DIR!" (
-    echo  [!] Could not delete all files
-    echo      Close related windows, then delete:
+    echo  [!] Some files locked. Close windows, delete:
     echo      !INSTALL_DIR!
 ) else (
-    echo  [OK] Done
+    echo  [OK]
 )
 
 echo(
-echo  Uninstall complete!
+echo  Done!
 echo(
 pause
 exit /b 0
 
 :EXIT
-call :LOG "Exited"
+call :LOG "Exit"
 exit /b 0
 
-:: ============================================
-:: CHECK_PORT - sets FOUND_PID if port 8888 is listening
 :: ============================================
 :CHECK_PORT
 set "FOUND_PID="
 set "_NS=%TEMP%\hc_ns_%RANDOM%.txt"
 netstat -ano > "!_NS!" 2>nul
 for /f "tokens=5" %%p in ('findstr /c:":8888 " "!_NS!" ^| findstr /c:"LISTENING"') do (
-    set "FOUND_PID=%%p"
+    if not "%%p"=="" set "FOUND_PID=%%p"
 )
 del "!_NS!" 2>nul
 goto :eof
 
-:: ============================================
-:: LOG - append to log file
-:: ============================================
 :LOG
 echo [%date% %time%] %~1 >> "!LOGFILE!"
 goto :eof
