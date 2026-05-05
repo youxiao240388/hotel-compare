@@ -5,8 +5,9 @@ Web 可视化界面 - Flask 后端
   GET  /                → 仪表盘主页
   POST /api/search      → 搜索酒店
   POST /api/compare     → 执行比价
-  GET  /api/status      → 检查各平台登录态
-  POST /api/login       → 打开登录页面
+  GET  /api/status      → 检查各平台 Cookie 状态
+  POST /api/cookie/import → 导入平台 Cookie
+  POST /api/cookie/clear  → 清除平台 Cookie
   POST /api/navigate    → 在浏览器中打开 URL（点击价格跳转）
   GET  /api/result/{id} → 获取比价结果
 """
@@ -20,6 +21,11 @@ from flask import Flask, render_template, request, jsonify, send_from_directory
 
 from src.browser import AutoBrowser
 from src.search import search_hotel
+from src.cookies import (
+    save_cookies, load_cookies, get_cookie_status,
+    clear_cookies, parse_cookie_string, list_all_cookies,
+    PLATFORM_DOMAINS,
+)
 from src.platforms import (
     get_scraper, PLATFORM_SCRAPERS, PLATFORM_NAMES, PLATFORM_TAGS,
     PLATFORM_EMOJI, LOGIN_URLS as ALL_LOGIN_URLS, build_platform_urls,
@@ -64,37 +70,65 @@ def index():
 
 @app.route("/api/status")
 def api_status():
-    """检查各平台登录状态"""
-    b = get_browser()
+    """检查各平台 Cookie 状态"""
     statuses = {}
-    for plat in PLATFORM_SCRAPERS:
-        logged_in = b.check_login_status(plat)
+    for plat in PLATFORM_TAGS:
+        status = get_cookie_status(plat)
         statuses[plat] = {
             "name": PLATFORM_NAMES.get(plat, plat),
-            "logged_in": logged_in,
+            "logged_in": status["has_cookies"] and status["count"] > status["expired_count"],
+            "cookie_count": status["count"],
+            "expired_count": status["expired_count"],
+            "last_modified": status["last_modified"],
         }
     return jsonify(statuses)
 
 
-@app.route("/api/login", methods=["POST"])
-def api_login():
-    """打开平台登录页"""
+@app.route("/api/cookie/import", methods=["POST"])
+def api_cookie_import():
+    """导入平台 Cookie"""
     data = request.get_json()
-    platform = data.get("platform", "")
-    
-    if platform not in ALL_LOGIN_URLS:
-        return jsonify({"error": f"未知平台: {platform}"}), 400
-    
-    b = get_browser()
-    try:
-        # 在新标签页打开登录页
-        b.page.new_tab(ALL_LOGIN_URLS[platform])
-        return jsonify({
-            "ok": True,
-            "message": f"已在浏览器中打开 {PLATFORM_NAMES.get(platform, platform)} 登录页",
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    platform = data.get("platform", "").strip()
+    cookie_text = data.get("cookies", "").strip()
+
+    if not platform:
+        return jsonify({"error": "请选择平台"}), 400
+    if platform not in PLATFORM_DOMAINS:
+        return jsonify({"error": f"不支持的平台: {platform}"}), 400
+    if not cookie_text:
+        return jsonify({"error": "请粘贴 Cookie 内容"}), 400
+
+    # 解析各种格式
+    cookies = parse_cookie_string(cookie_text)
+    if not cookies:
+        return jsonify({"error": "无法解析 Cookie，请检查格式"}), 400
+
+    # 保存
+    result = save_cookies(platform, cookies)
+    if not result["ok"]:
+        return jsonify({"error": result["error"]}), 400
+
+    return jsonify({
+        "ok": True,
+        "message": f"已保存 {result['count']} 条 Cookie 到 {PLATFORM_NAMES.get(platform, platform)}",
+        "count": result["count"],
+    })
+
+
+@app.route("/api/cookie/clear", methods=["POST"])
+def api_cookie_clear():
+    """清除平台 Cookie"""
+    data = request.get_json()
+    platform = data.get("platform", "").strip()
+
+    if not platform:
+        return jsonify({"error": "请指定平台"}), 400
+
+    cleared = clear_cookies(platform)
+    return jsonify({
+        "ok": True,
+        "message": f"已清除 {PLATFORM_NAMES.get(platform, platform)} 的 Cookie" if cleared else "该平台无 Cookie",
+    })
 
 
 @app.route("/api/search", methods=["POST"])
