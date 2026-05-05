@@ -10,6 +10,8 @@ from dataclasses import dataclass, field, asdict
 from datetime import date
 from typing import Optional
 
+from src.cookies import inject_cookies
+
 logger = logging.getLogger(__name__)
 
 
@@ -87,6 +89,13 @@ class BaseScraper(ABC):
 
         try:
             page = self.browser.connect()
+
+            # 0. 注入 cookie（必须在导航前）
+            n_cookies = inject_cookies(page, self.platform_name)
+            if n_cookies:
+                logger.info(f"[{self.platform_name}] 已注入 {n_cookies} 条 cookie")
+            else:
+                logger.warning(f"[{self.platform_name}] 无 cookie，可能无法获取价格")
 
             # 1. 导航
             url = self.build_url(hotel_id, checkin, checkout)
