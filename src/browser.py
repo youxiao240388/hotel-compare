@@ -235,32 +235,16 @@ class AutoBrowser:
         """
         检测平台登录态是否有效
 
-        简单方法：访问平台首页，检查是否跳转到登录页
+        基于 cookie 文件判断：有 cookie 文件且未全部过期 → 已登录
         """
-        if not self.page:
+        from src.cookies import get_cookie_status
+        status = get_cookie_status(platform)
+        if not status["has_cookies"]:
             return False
-
-        check_urls = {
-            "ctrip": "https://hotels.ctrip.com/",
-            "meituan": "https://i.meituan.com/",
-            "fliggy": "https://www.fliggy.com/",
-        }
-
-        url = check_urls.get(platform)
-        if not url:
-            return True  # 未知平台默认认为已登录
-
-        try:
-            tab = self.page.new_tab(url)
-            time.sleep(3)
-            current_url = tab.url.lower()
-            tab.close()
-
-            # 如果 URL 包含 login/passport，说明未登录
-            no_login_indicators = ["login", "passport", "signin", "auth"]
-            return not any(ind in current_url for ind in no_login_indicators)
-        except Exception:
+        # 如果所有 cookie 都过期了，也认为未登录
+        if status["expired_count"] >= status["count"]:
             return False
+        return True
 
     def is_blocked(self) -> bool:
         """检测是否被反爬封锁"""
